@@ -1,0 +1,42 @@
+#core frameworks
+langchain>=0.1.14
+streamlit>=1.35.0
+
+#LLM provider
+groq
+langchain-groq
+
+#langchain additional dependencies
+langchain-community
+langchain-core
+langchain-tool
+langchain-huggingface
+langchain-pinecone
+langchain-tavily
+
+# Vector store and embeddings
+chromadb
+pinecone-client
+
+#Embeddings models
+sentence-transformers
+transformers
+torch
+
+# tools and utilities
+python-dotenv
+tqdm
+requests
+pydantic>=1.10.7
+
+#math & finance
+yfinance
+wolframalpha
+sympy
+
+#frontend
+streamlit-option-menu
+streamlit-extras
+
+#Dev utilities
+watchdog

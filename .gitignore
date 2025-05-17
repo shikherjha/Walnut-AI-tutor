@@ -1,0 +1,14 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+walnut_py312/
+walnut_ai/
+.env 
+uv.lock
