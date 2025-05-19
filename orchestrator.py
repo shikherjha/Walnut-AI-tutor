@@ -1,189 +1,260 @@
 import streamlit as st
-import base64
-import re
-import json
-from typing import Tuple, Optional, Dict, Any
-import time
 import os
+import re
+import base64
+from typing import Optional
 from dotenv import load_dotenv
 
+# Import all agents
+try:
+    from agents.abacus_agent import get_abacus_agent
+    ABACUS_AVAILABLE = True
+except ImportError:
+    ABACUS_AVAILABLE = False
 
-from agents.abacus_agent import get_abacus_agent
+try:
+    from agents.finance_agent import get_finance_agent
+    FINANCE_AVAILABLE = True
+except ImportError:
+    FINANCE_AVAILABLE = False
 
+try:
+    from agents.vedic_maths_agent import get_vedic_agent
+    VEDIC_AVAILABLE = True
+except ImportError:
+    VEDIC_AVAILABLE = False
 
 load_dotenv()
 
-# Initialize the abacus agent
-abacus_agent = get_abacus_agent()
+# Initialize session state
+if 'selected_agent' not in st.session_state:
+    st.session_state.selected_agent = 'Finance'
 
-def extract_base64_image(response: str) -> Optional[str]:
-    """
-    Extract base64 image data from agent response.
-    Returns the base64 string or None if not found.
-    """
+# Initialize agents (only available ones)
+@st.cache_resource
+def initialize_agents():
+    """Initialize available agents and cache them"""
+    agents = {}
     
-    if not response:
-        return None
-        
+    if FINANCE_AVAILABLE:
+        try:
+            agents['Finance'] = get_finance_agent()
+        except Exception as e:
+            st.error(f"Failed to initialize Finance agent: {e}")
     
-    if len(response) > 100 and response.strip().startswith("data:image") or response.strip().startswith("iVBOR"):
-        return response.strip()
+    if ABACUS_AVAILABLE:
+        try:
+            agents['Abacus'] = get_abacus_agent()
+        except Exception as e:
+            st.error(f"Failed to initialize Abacus agent: {e}")
     
- 
-    base64_pattern = r'data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)'
-    match = re.search(base64_pattern, response)
-    if match:
-        return match.group(1)
+    if VEDIC_AVAILABLE:
+        try:
+            agents['Vedic Maths'] = get_vedic_agent()
+        except Exception as e:
+            st.error(f"Failed to initialize Vedic Maths agent: {e}")
     
-   
-    base64_only_pattern = r'([A-Za-z0-9+/=]{100,})'
-    match = re.search(base64_only_pattern, response)
-    if match:
-        return match.group(1)
-    
-    return None
+    return agents
 
-def display_abacus_response(response: str, trace: Any = None):
-    """
-    Display the abacus agent response with proper formatting for text and images
-    """
-    # Extract any base64 image
-    base64_image = extract_base64_image(response)
-    
-    # Clean up the response text by removing any base64 data to make it readable
-    if base64_image and len(base64_image) > 100:
-        clean_text = re.sub(r'data:image\/[^;]+;base64,[A-Za-z0-9+/=]+', 
-                           '[Abacus Visualization]', response)
-        clean_text = re.sub(r'[A-Za-z0-9+/=]{100,}', '[Abacus Visualization]', clean_text)
-    else:
-        clean_text = response
-    
- 
-    st.markdown("### Abacus Explanation")
-    st.write(clean_text)
-   
-    if base64_image:
-        st.markdown("### Abacus Visualization")
+def get_agent_examples(agent_type: str) -> list:
+    """Return example queries based on selected agent"""
+    examples = {
+        'Finance': [
+            "Explain the basics of stock market investing",
+            "How do I calculate compound interest?",
+            "What is the difference between debt and equity?",
+            "Teach me about financial planning for beginners"
+        ],
+        'Abacus': [
+            "Show me how to add 123 + 456 on an abacus",
+            "How do I subtract 78 from 125 on an abacus?",
+            "Teach me multiplication on an abacus",
+            "What are the basic parts of an Indian abacus?"
+        ],
+        'Vedic Maths': [
+            "Show me the Vedic method for multiplication",
+            "How to use the Ekadhikena Purvena sutra?",
+            "Teach me fast division using Vedic methods",
+            "What are the 16 Vedic math sutras?"
+        ]
+    }
+    return examples.get(agent_type, [])
+
+def display_image_from_base64(base64_string):
+    """Display an image from a base64 string in Streamlit"""
+    try:
+        # If the string already starts with 'data:image', use it directly
+        if not base64_string.startswith('data:image'):
+            base64_string = f"data:image/png;base64,{base64_string}"
         
+        # Create an HTML img tag
+        html = f'<img src="{base64_string}" style="max-width:100%;"/>'
+        st.markdown(html, unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"Failed to display image: {e}")
+
+def process_response(response):
+    """Process the response to extract any base64 images and format the text
     
-        if base64_image.startswith('data:image'):
-            st.image(base64_image)
-      
-        else:
+    Args:
+        response: The text response from the agent
+        
+    Returns:
+        Processed text with images displayed if present
+    """
+    # Check if there are any base64 images embedded in markdown format
+    img_pattern = r'!\[.*?\]\((data:image\/[^;]+;base64,[^)]+)\)'
+    matches = re.findall(img_pattern, response)
+    
+    if matches:
+        # Split the response by image tags
+        parts = re.split(img_pattern, response)
+        
+        # Display each text part followed by its corresponding image
+        for i, part in enumerate(parts):
+            if part.strip():
+                st.markdown(part)
+            
+            # Display image after each part (except after the last part)
+            if i < len(matches):
+                display_image_from_base64(matches[i])
+        return ""
+    
+    # Check for base64 strings without markdown formatting
+    base64_pattern = r'(data:image\/[^;]+;base64,[A-Za-z0-9+/=]+)'
+    base64_matches = re.findall(base64_pattern, response)
+    
+    if base64_matches:
+        # Remove the base64 strings from the response
+        clean_text = re.sub(base64_pattern, '', response)
+        st.markdown(clean_text)
+        
+        # Display the images
+        for img_data in base64_matches:
+            display_image_from_base64(img_data)
+        return ""
+    
+    # Look for plain base64 strings
+    plain_base64_pattern = r'([A-Za-z0-9+/=]{50,})'
+    plain_matches = re.findall(plain_base64_pattern, response)
+    
+    if plain_matches:
+        for potential_base64 in plain_matches:
             try:
-                
-                st.image(f"data:image/png;base64,{base64_image}")
-            except Exception:
-                
-                st.error("Could not display image visualization")
+                # Try to decode it to check if it's valid base64
+                base64.b64decode(potential_base64)
+                # If it decodes successfully, it might be an image
+                display_image_from_base64(potential_base64)
+                # Remove it from the response
+                response = response.replace(potential_base64, "*[Image displayed above]*")
+            except:
+                # Not valid base64, continue
+                pass
+    
+    return response
 
 def main():
     st.set_page_config(
-        page_title="Abacus Tutor",
-        page_icon="🧮",
-        layout="wide"
+        page_title="Educational AI Tutor",
+        page_icon="🎓",
+        layout="centered"
     )
     
-    st.title("🧮 Interactive Abacus Tutor")
+    st.title("🎓 Educational AI Tutor")
+    st.markdown("Choose your learning domain and get personalized tutoring!")
     
-    # Sidebar for options
-    st.sidebar.header("Options")
-    visualization_enabled = st.sidebar.checkbox("Enable Visualizations", value=True)
+    # Initialize agents
+    agents = initialize_agents()
     
-    # Teaching mode selection
-    teaching_mode = st.sidebar.radio(
-        "Teaching Mode",
-        ["Basic Operations", "Advanced Techniques", "Practice Problems"]
-    )
+    if not agents:
+        st.error("No agents available. Please check your agent implementations.")
+        return
     
-    # Main content area
-    st.markdown("""
-    Welcome to the Abacus Tutor! Ask questions about abacus calculations or follow along with guided examples.
-    The tutor will show you step-by-step how to use an abacus for various calculations.
-    """)
+    # Agent selection
+    available_agents = list(agents.keys())
     
-    # Example queries
-    st.markdown("### Example Queries")
-    example_queries = [
-        "Show me how to add 123 + 456 on an abacus",
-        "How do I subtract 78 from 125 on an abacus?",
-        "Teach me multiplication on an abacus",
-        "What are the basic parts of an Indian abacus?"
-    ]
+    # Create columns for agent selection
+    st.markdown("### Choose Your Tutor:")
+    agent_cols = st.columns(len(available_agents))
     
-    # Create columns for example buttons
-    cols = st.columns(2)
-    example_buttons = {}
+    for i, agent_name in enumerate(available_agents):
+        with agent_cols[i]:
+            if st.button(f"📚 {agent_name}", key=f"agent_{agent_name}"):
+                st.session_state.selected_agent = agent_name
+                st.rerun()
     
+    # Show selected agent
+    selected_agent = st.session_state.selected_agent
+    if selected_agent not in available_agents:
+        selected_agent = available_agents[0]
+        st.session_state.selected_agent = selected_agent
+    
+    st.markdown(f"**Current Tutor:** {selected_agent}")
+    
+    # Display example queries
+    st.markdown("### 💡 Example Questions")
+    example_queries = get_agent_examples(selected_agent)
+    
+    # Create buttons for examples
     for i, query in enumerate(example_queries):
-        col_idx = i % 2
-        with cols[col_idx]:
-            example_buttons[query] = st.button(query)
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            st.write(f"• {query}")
+        with col2:
+            if st.button("Try", key=f"try_{i}"):
+                st.session_state.current_query = query
+                st.rerun()
     
     # Input area
-    user_query = st.text_input("Enter your question:", key="user_query")
+    st.markdown("### 💬 Ask Your Question")
     
-    # Process example button clicks
-    for query, clicked in example_buttons.items():
-        if clicked:
-            user_query = query
-            st.session_state.user_query = query
+    # Get query from session state or use empty string
+    default_query = st.session_state.get('current_query', '')
     
-    # Process user query when submitted
-    if st.button("Submit") or user_query:
-        if not user_query:
-            st.warning("Please enter a question or select an example.")
+    # Text input
+    user_query = st.text_area(
+        "Enter your question:",
+        value=default_query,
+        height=100,
+        key="query_input"
+    )
+    
+    # Submit button
+    if st.button("🚀 Get Answer", type="primary"):
+        if not user_query.strip():
+            st.warning("Please enter a question first!")
             return
+        
+        # Save the query to session state to preserve it across reloads
+        if 'current_query' in st.session_state:
+            st.session_state.current_query = user_query
             
-        with st.spinner("Generating response..."):
-            # Call the abacus agent with the query
-            response, trace = abacus_agent.handle_query(user_query)
-            
-            # Display the response
-            display_abacus_response(response, trace)
-            
-            # Optional: Display debugging info in the sidebar if in development
-            if os.environ.get("ENVIRONMENT") == "development":
-                with st.sidebar.expander("Debug Info"):
-                    st.json(trace)
+        # Process the query with selected agent
+        with st.spinner(f"Getting response from {selected_agent} tutor..."):
+            try:
+                agent = agents[selected_agent]
+                response, trace = agent.handle_query(user_query.strip())
+                
+                # Display the response
+                st.markdown("### 📝 Response")
+                
+                # Process the response for any images and display formatted text
+                processed_response = process_response(response)
+                if processed_response:  # If there's any leftover text to display
+                    st.markdown(processed_response)
+                
+                # Show debug info if in development mode
+                if os.environ.get("ENVIRONMENT") == "development":
+                    with st.expander("🔍 Debug Info"):
+                        st.json(trace)
+                        
+            except Exception as e:
+                st.error(f"Error getting response: {str(e)}")
+                st.info("Please try again with a different question.")
     
-    # Add a section for interactive abacus practice if in that mode
-    if teaching_mode == "Practice Problems":
-        st.markdown("---")
-        st.header("Practice Zone")
-        
-        # Generate some practice problems
-        st.markdown("### Try these practice problems:")
-        
-        practice_cols = st.columns(3)
-        with practice_cols[0]:
-            if st.button("Addition Practice"):
-                with st.spinner("Generating practice problem..."):
-                    response, _ = abacus_agent.handle_query("Generate an addition practice problem")
-                    st.session_state.practice_problem = response
-        
-        with practice_cols[1]:
-            if st.button("Subtraction Practice"):
-                with st.spinner("Generating practice problem..."):
-                    response, _ = abacus_agent.handle_query("Generate a subtraction practice problem")
-                    st.session_state.practice_problem = response
-        
-        with practice_cols[2]:
-            if st.button("Mixed Practice"):
-                with st.spinner("Generating practice problem..."):
-                    response, _ = abacus_agent.handle_query("Generate a mixed practice problem")
-                    st.session_state.practice_problem = response
-        
-        # Display the current practice problem if available
-        if hasattr(st.session_state, 'practice_problem'):
-            st.markdown(st.session_state.practice_problem)
-            
-            # Answer submission
-            user_answer = st.text_input("Your answer:")
-            if st.button("Check Answer"):
-                with st.spinner("Checking answer..."):
-                    response, _ = abacus_agent.handle_query(f"Check if {user_answer} is the correct answer to the practice problem")
-                    display_abacus_response(response)
+    # Footer
+    st.markdown("---")
+    st.markdown("💡 **Tip**: Be specific with your questions for better responses!")
 
 if __name__ == "__main__":
     main()
